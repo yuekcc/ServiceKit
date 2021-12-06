@@ -1,12 +1,7 @@
-import { ServiceKit } from './dist/index.js';
+import { ServiceKit, Response } from './dist/index.js';
 
-const srv = new ServiceKit(console);
+const bus = new ServiceKit(console);
 
-srv
-  .on('/', () => {
-    return {
-      status: 200,
-      body: JSON.stringify({ message: 'ok' }),
-    };
-  })
-  .listen(9099);
+bus.on('/', () => Response.from({ message: 'ok' }, 200));
+
+bus.launch(9099);

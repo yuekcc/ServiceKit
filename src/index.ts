@@ -7,9 +7,22 @@ export interface Logger {
   [method: string]: (...msg: any[]) => void;
 }
 
-export interface Response {
-  status: number;
-  body?: Buffer;
+export class Response {
+  status: number = 200;
+  data?: Buffer = null;
+
+  constructor(data: Buffer, status) {
+    this.status = status;
+    this.data = data;
+  }
+
+  static from(obj: object, status: number = 200): Response {
+    if (typeof obj === 'string') {
+      return new Response(Buffer.from(obj, 'utf-8'), status);
+    }
+
+    return new Response(Buffer.from(JSON.stringify(obj), 'utf-8'), status);
+  }
 }
 
 export type Handler = (context: any) => Promise<Response>;
@@ -59,18 +72,23 @@ export class ServiceKit {
 
     const handler = this.router[prefixedPath];
     if (handler) {
-      const context = {
+      const event = {
+        data: method === 'POST' || method === 'PUT' ? await getRequestBody(req) : null,
+        headers: req.headers,
         method,
         pathname,
         searchParams: url.searchParams,
-        headers: req.headers,
-        data: method === 'POST' || method === 'PUT' ? await getRequestBody(req) : null,
       };
 
-      const response = await handler(context);
-      res.writeHead(response.status);
-      if (response.body) {
-        res.write(response.body);
+      try {
+        const reply = await handler(event);
+        res.writeHead(reply.status);
+        if (reply.data) {
+          res.write(reply.data);
+        }
+      } catch (err: unknown) {
+        res.writeHead(500);
+        res.write((err as Error).message || 'unknown error');
       }
 
       res.end();
@@ -81,15 +99,15 @@ export class ServiceKit {
     res.end();
   }
 
-  on(url: string, handler: Handler) {
-    const prefixedPath = `${url}`;
-    this.router[prefixedPath] = handler;
+  on(path: string, handler: Handler) {
+    this.router[path] = handler;
 
     return this;
   }
 
-  listen(port: number) {
+  launch(port: number) {
     const server = createServer((req, res) => this.doRequest(req, res));
+
     server.listen(port, () => {
       this.logger.info('\n\n' + `Server started on http://localhost:${port}` + '\n\n');
     });

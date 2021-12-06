@@ -4,7 +4,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "build": "esbuild --platform=node --target=node14 --format=esm --outdir=dist src/index.ts"
+    "build": "esbuild --platform=node --target=node14 --format=esm --outdir=dist --sourcemap src/index.ts"
   },
   "author": "yuekcc",
   "license": "MIT",
