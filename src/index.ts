@@ -1,37 +1,53 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { Stream } from 'stream';
 
-export type LoggerMethod = 'info' | 'warn' | 'error' | 'debug' | 'trace';
-
-export interface Logger {
-  [method: string]: (...msg: any[]) => void;
+export interface ReplyOptions {
+  status: number;
+  headers?: Record<string, string>;
 }
 
-export class Response {
-  status: number = 200;
-  data?: Buffer = null;
+export type ReplayPayload = Buffer | object | Array<any> | string | number | boolean;
 
-  constructor(data: Buffer, status) {
+export class Reply {
+  status: number = 200;
+  data?: ReplayPayload;
+  headers?: Record<string, string>;
+
+  constructor(data: ReplayPayload, { status, headers }: ReplyOptions) {
     this.status = status;
     this.data = data;
+    this.headers = headers;
   }
 
-  static from(obj: object, status: number = 200): Response {
+  static from(obj: object | string, status: number = 200): Reply {
     if (typeof obj === 'string') {
-      return new Response(Buffer.from(obj, 'utf-8'), status);
+      return new Reply(Buffer.from(obj, 'utf-8'), { status });
     }
 
-    return new Response(Buffer.from(JSON.stringify(obj), 'utf-8'), status);
+    return new Reply(Buffer.from(JSON.stringify(obj), 'utf-8'), { status });
   }
 }
 
-export type Handler = (context: any) => Promise<Response>;
+export interface Context {
+  data: Buffer;
+  headers: Record<string, string>;
+  method: string;
+  pathname: string;
+  searchParams: URLSearchParams;
+}
+
+export type Handler = (context: Readonly<Context>) => Promise<Reply>;
 
 export interface Router {
   [url: string]: Handler;
 }
 
-function getRequestBody(rs: Stream): Promise<Buffer> {
+export interface Route {
+  path: string;
+  handler: Handler;
+}
+
+function readAll(rs: Stream): Promise<Buffer> {
   return new Promise(resolve => {
     let result: Buffer | null = null;
     rs.addListener('data', (chunk: Buffer) => {
@@ -46,17 +62,16 @@ function getRequestBody(rs: Stream): Promise<Buffer> {
   });
 }
 
-export class ServiceKit {
-  private logger!: Logger;
-  private router!: Router;
+export class HttpServer {
+  private logger!: Console;
+  private routes: Route[] = [];
   private supportedHttpMethods = ['OPTIONS', 'GET', 'POST', 'PUT', 'DELETE'];
 
-  constructor(logger: Logger) {
+  constructor(logger: Console) {
     this.logger = logger;
-    this.router = {};
   }
 
-  private async doRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const method = req.method?.toUpperCase();
 
     if (!this.supportedHttpMethods.includes(method)) {
@@ -68,48 +83,56 @@ export class ServiceKit {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const pathname = url.pathname || '/';
 
-    const prefixedPath = `${pathname}`;
+    // TODO: 更好的 router 实现
+    const route = this.routes.find(it => it.path === pathname);
 
-    const handler = this.router[prefixedPath];
-    if (handler) {
-      const event = {
-        data: method === 'POST' || method === 'PUT' ? await getRequestBody(req) : null,
-        headers: req.headers,
-        method,
-        pathname,
-        searchParams: url.searchParams,
-      };
-
-      try {
-        const reply = await handler(event);
-        res.writeHead(reply.status);
-        if (reply.data) {
-          res.write(reply.data);
-        }
-      } catch (err: unknown) {
-        res.writeHead(500);
-        res.write((err as Error).message || 'unknown error');
-      }
-
+    if (!route) {
+      res.writeHead(404);
       res.end();
       return;
     }
 
-    res.writeHead(404);
-    res.end();
+    const handler = route.handler;
+
+    const context: Context = Object.freeze({
+      data: method === 'POST' || method === 'PUT' ? await readAll(req) : null,
+      headers: req.headers as Record<string, string>,
+      method,
+      pathname,
+      searchParams: url.searchParams,
+    });
+
+    try {
+      const reply = await handler(context);
+
+      res.writeHead(reply.status, null, reply.headers);
+      if (reply.data) {
+        res.write(reply.data);
+      }
+    } catch (err: unknown) {
+      res.writeHead(500);
+      res.write((err as Error).message || 'unknown error');
+    } finally {
+      res.end();
+    }
   }
 
   on(path: string, handler: Handler) {
-    this.router[path] = handler;
+    this.routes.push({
+      path,
+      handler,
+    });
 
     return this;
   }
 
-  launch(port: number) {
-    const server = createServer((req, res) => this.doRequest(req, res));
+  serve(port: number) {
+    this.routes.sort((a, b) => b.path.length - a.path.length);
+
+    const server = createServer((req, res) => this.handleRequest(req, res));
 
     server.listen(port, () => {
-      this.logger.info('\n\n' + `Server started on http://localhost:${port}` + '\n\n');
+      this.logger.info('\n\t' + `Server hosted at http://localhost:${port}` + '\n');
     });
   }
 }

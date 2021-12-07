@@ -1,7 +1,3 @@
-import { ServiceKit, Response } from './dist/index.js';
+import { HttpServer, Reply } from './dist/index.js';
 
-const bus = new ServiceKit(console);
-
-bus.on('/', () => Response.from({ message: 'ok' }, 200));
-
-bus.launch(9099);
+new HttpServer(console).on('/', () => Reply.from({ message: 'ok' }, 200)).serve(9099);
