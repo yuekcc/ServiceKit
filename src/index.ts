@@ -39,6 +39,7 @@ export interface Context {
   headers: Record<string, string>;
   method: string;
   pathname: string;
+  pathParams: Record<string, string>;
   searchParams: URLSearchParams;
 }
 
@@ -51,6 +52,37 @@ export interface Router {
 export interface Route {
   path: string;
   handler: Handler;
+  match: (path: string) => Record<string, string> | null;
+}
+
+function pathToMatcher(path: string): (pathname: string) => Record<string, string> | null {
+  const samples = path.split('/').filter(Boolean);
+  const samplesLen = samples.length;
+
+  return (path: string) => {
+    const parts = path.split('/').filter(Boolean);
+    if (parts.length != samplesLen) {
+      return null;
+    }
+
+    const pathParams: Record<string, string> = {};
+
+    for (let i = 0; i < samplesLen; i++) {
+      const sample = samples[i];
+      const part = parts[i];
+
+      if (sample.startsWith(':')) {
+        pathParams[sample.substr(1)] = part;
+        continue;
+      }
+
+      if (sample !== part) {
+        return null;
+      }
+    }
+
+    return pathParams;
+  };
 }
 
 function readAll(rs: Stream): Promise<Buffer> {
@@ -89,22 +121,28 @@ export class HttpServer {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const pathname = url.pathname || '/';
 
-    // TODO: 更好的 router 实现
-    const route = this.routes.find(it => it.path === pathname);
+    let handler: Handler;
+    let pathParams: Record<string, string> = {};
+    for (const route of this.routes) {
+      pathParams = route.match(pathname);
+      if (pathParams) {
+        handler = route.handler;
+        break;
+      }
+    }
 
-    if (!route) {
+    if (!handler) {
       res.writeHead(404);
       res.end();
       return;
     }
-
-    const handler = route.handler;
 
     const context: Context = Object.freeze({
       data: method === 'POST' || method === 'PUT' ? await readAll(req) : null,
       headers: req.headers as Record<string, string>,
       method,
       pathname,
+      pathParams,
       searchParams: url.searchParams,
     });
 
@@ -127,6 +165,7 @@ export class HttpServer {
     this.routes.push({
       path,
       handler,
+      match: pathToMatcher(path),
     });
 
     return this;
