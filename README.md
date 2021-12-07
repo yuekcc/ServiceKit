@@ -1,6 +1,6 @@
 # ServiceKit
 
-event-bus 风格的迷你 web 框架
+迷你 http 服务器开发库，基于 `http` 模块。
 
 ## LICENSE
 

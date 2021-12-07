@@ -21,10 +21,16 @@ export class Reply {
 
   static from(obj: object | string, status: number = 200): Reply {
     if (typeof obj === 'string') {
-      return new Reply(Buffer.from(obj, 'utf-8'), { status });
+      return new Reply(Buffer.from(obj, 'utf-8'), {
+        status,
+        headers: { 'Content-Type': 'plain/text; charset=utf-8' },
+      });
     }
 
-    return new Reply(Buffer.from(JSON.stringify(obj), 'utf-8'), { status });
+    return new Reply(Buffer.from(JSON.stringify(obj), 'utf-8'), {
+      status,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    });
   }
 }
 
